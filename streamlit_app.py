@@ -17,14 +17,14 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 GOOGLE_DRIVE_CONFIG = {
-    "file_id": "1FrAR9SRDVbppLbeP-F2IFY3FQwLWB1oX", 
+    "file_id": "1FrAR9SRDVbppLbeP-F2IFY3FQwLWB1oX",  
     "file_name": "20250327_가공식품DB_147999건.xlsx"
 }
 
 # Streamlit 페이지 설정
 st.set_page_config(
     page_title="식품영양정보 분석기",
-    page_title_icon="🍎",
+    page_icon="🍎",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -183,17 +183,11 @@ def load_data_from_pickle():
 def load_data_from_database():
     """PostgreSQL/MySQL에서 데이터 로드 (프로덕션 환경)"""
     
-    # Streamlit secrets에서 DB 정보 가져오기
-    # secrets.toml 파일에 설정:
-    # [database]
-    # host = "your-host"
-    # port = 5432
-    # database = "nutrition_db"
-    # username = "your-user"
-    # password = "your-password"
+    if not HAS_SQLALCHEMY:
+        return None
     
     try:
-        # PostgreSQL 연결 예시
+        # Streamlit secrets에서 DB 정보 가져오기
         db_config = st.secrets.get("database", {})
         if not db_config:
             return None
@@ -218,8 +212,8 @@ def load_data_from_database():
         engine.dispose()
         return df
         
-    except Exception as e:
-        # DB 연결 실패시 조용히 넘어감 (백업 로딩 방법 사용)
+    except Exception:
+        # DB 연결 실패시 조용히 넘어감
         return None
 
 def load_data():
@@ -256,8 +250,8 @@ def load_data():
         st.sidebar.info(f"🌐 원격 DB: {len(df):,}개 식품 ({load_time:.2f}초)")
         return df
     
-    # 5순위: Google Drive에서 다운로드 https://docs.google.com/spreadsheets/d/1FrAR9SRDVbppLbeP-F2IFY3FQwLWB1oX/edit
-    if GOOGLE_DRIVE_CONFIG["file_id"] != "":
+    # 5순위: Google Drive에서 다운로드
+    if GOOGLE_DRIVE_CONFIG["file_id"] != "1your-google-drive-file-id-here":
         google_drive_file = download_from_google_drive(
             GOOGLE_DRIVE_CONFIG["file_id"], 
             GOOGLE_DRIVE_CONFIG["file_name"]
@@ -538,7 +532,7 @@ def main():
                     os.remove(cache_file)
             st.cache_data.clear()
             st.success("캐시가 초기화되었습니다!")
-            st.experimental_rerun()
+            st.rerun()
         
         st.info("💡 최초 실행 후 로딩 속도가 10-50배 향상됩니다")
     
