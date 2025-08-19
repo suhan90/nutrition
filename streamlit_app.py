@@ -218,20 +218,19 @@ def load_data_from_database():
         return None
 
 def load_data():
-    """초고속 데이터 로딩 - 여러 방법 중 최적 경로 자동 선택"""
+    """초고속 데이터 로딩 - 여러 소스에서 최적 경로 자동 선택"""
     
-    # 성능 측정 시작
     import time
     start_time = time.time()
     
-    # 1순위: Pickle 캐시 (가장 빠름, Python 객체 직렬화)
+    # 1순위: Pickle 캐시 (가장 빠름)
     df = load_data_from_pickle()
     if df is not None:
         load_time = time.time() - start_time
         st.sidebar.success(f"🚀 Pickle 캐시: {len(df):,}개 식품 ({load_time:.2f}초)")
         return df
     
-    # 2순위: SQLite 로컬 DB (빠름 + 쿼리 최적화)
+    # 2순위: SQLite 로컬 DB
     df = load_data_from_sqlite()
     if df is not None:
         load_time = time.time() - start_time
@@ -245,62 +244,100 @@ def load_data():
         st.sidebar.success(f"⚡ Parquet: {len(df):,}개 식품 ({load_time:.2f}초)")
         return df
     
-    # 4순위: 원격 데이터베이스 (프로덕션)
+    # 4순위: 원격 데이터베이스
     df = load_data_from_database()
     if df is not None:
         load_time = time.time() - start_time
         st.sidebar.info(f"🌐 원격 DB: {len(df):,}개 식품 ({load_time:.2f}초)")
         return df
     
-    # 5순위: 원본 파일에서 직접 로드 (최초 실행)
-    csv_file_path = './20250327_가공식품DB_147999건.csv'
-    xls_file_path = './20250327_가공식품DB_147999건.xlsx'
+    # 5순위: Google Drive에서 다운로드 https://docs.google.com/spreadsheets/d/1FrAR9SRDVbppLbeP-F2IFY3FQwLWB1oX/edit
+    if GOOGLE_DRIVE_CONFIG["file_id"] != "1FrAR9SRDVbppLbeP-F2IFY3FQwLWB1oX":
+        google_drive_file = download_from_google_drive(
+            GOOGLE_DRIVE_CONFIG["file_id"], 
+            GOOGLE_DRIVE_CONFIG["file_name"]
+        )
+        if google_drive_file and os.path.exists(google_drive_file):
+            try:
+                df = pd.read_excel(google_drive_file)
+                load_time = time.time() - start_time
+                st.sidebar.info(f"☁️ Google Drive: {len(df):,}개 식품 ({load_time:.2f}초)")
+                
+                # 전처리 및 캐시 생성
+                df = preprocess_dataframe(df)
+                create_all_caches(df)
+                return df
+            except Exception as e:
+                st.error(f"Google Drive 파일 로딩 오류: {e}")
     
-    try:
-        if os.path.exists(csv_file_path):
-            df = pd.read_csv(csv_file_path, encoding='utf-8', low_memory=False)
-            st.sidebar.warning("📁 원본 CSV 로드 중... (최초 실행시 캐시 생성)")
-        elif os.path.exists(xls_file_path):
-            df = pd.read_excel(xls_file_path)
-            st.sidebar.warning("📁 원본 Excel 로드 중... (최초 실행시 캐시 생성)")
-        else:
-            return None
-            
-        # 기본 전처리
-        columns_to_use = [
-            '식품명', '대표식품명', '식품소분류명',
-            '에너지(kcal)', '단백질(g)', '지방(g)', '탄수화물(g)', '당류(g)',
-            '나트륨(mg)', '콜레스테롤(mg)', '포화지방산(g)', '트랜스지방산(g)',
-            '식이섬유(g)', '칼슘(mg)', '식품중량', '제조사명'
-        ]
+    # 6순위: 로컬 파일 검색
+    local_files = ['./20250327_가공식품DB_147999건.csv', './20250327_가공식품DB_147999건.xlsx']
+    
+    for file_path in local_files:
+        if os.path.exists(file_path):
+            try:
+                if file_path.endswith('.csv'):
+                    df = pd.read_csv(file_path, encoding='utf-8', low_memory=False)
+                    st.sidebar.warning(f"📁 로컬 CSV: {len(df):,}개 식품")
+                else:
+                    df = pd.read_excel(file_path)
+                    st.sidebar.warning(f"📁 로컬 Excel: {len(df):,}개 식품")
+                
+                load_time = time.time() - start_time
+                st.sidebar.info(f"로딩 시간: {load_time:.2f}초")
+                
+                # 전처리 및 캐시 생성
+                df = preprocess_dataframe(df)
+                create_all_caches(df)
+                return df
+                
+            except Exception as e:
+                st.error(f"{file_path} 로딩 오류: {e}")
+                continue
+    
+    # 모든 방법 실패시 파일 업로드 유도
+    return None
+
+def preprocess_dataframe(df):
+    """DataFrame 전처리"""
+    columns_to_use = [
+        '식품명', '대표식품명', '식품소분류명',
+        '에너지(kcal)', '단백질(g)', '지방(g)', '탄수화물(g)', '당류(g)',
+        '나트륨(mg)', '콜레스테롤(mg)', '포화지방산(g)', '트랜스지방산(g)',
+        '식이섬유(g)', '칼슘(mg)', '식품중량', '제조사명'
+    ]
+    
+    existing_cols = [col for col in columns_to_use if col in df.columns]
+    df = df[existing_cols]
+    df = df.dropna(subset=['식품명'])
+    
+    # 데이터 타입 최적화
+    for col in df.select_dtypes(include=['float64']).columns:
+        df[col] = pd.to_numeric(df[col], downcast='float')
+    
+    categorical_cols = ['식품소분류명', '제조사명']
+    for col in categorical_cols:
+        if col in df.columns:
+            df[col] = df[col].astype('category')
+    
+    return df
+
+def create_all_caches(df):
+    """모든 캐시 형태 생성"""
+    with st.spinner("⚡ 고속 캐시 생성 중... (다음번부터 초고속 로딩!)"):
+        # Parquet 파일
+        parquet_path = './nutrition_data_optimized.parquet'
+        df.to_parquet(parquet_path, compression='snappy', index=False)
         
-        existing_cols = [col for col in columns_to_use if col in df.columns]
-        df = df[existing_cols]
-        df = df.dropna(subset=['식품명'])
+        # Pickle 캐시
+        pickle_path = './nutrition_data.pkl'
+        with open(pickle_path, 'wb') as f:
+            pickle.dump(df, f, protocol=pickle.HIGHEST_PROTOCOL)
         
-        load_time = time.time() - start_time
-        st.sidebar.warning(f"📁 원본 파일: {len(df):,}개 식품 ({load_time:.2f}초)")
+        # SQLite DB
+        create_sqlite_db(df, './nutrition_data.db')
         
-        # 백그라운드에서 모든 캐시 형태 생성
-        with st.spinner("다음번 고속 로딩을 위한 캐시 생성 중..."):
-            # Parquet 최적화
-            convert_to_parquet()
-            
-            # Pickle 캐시 생성
-            pickle_path = './nutrition_data.pkl'
-            with open(pickle_path, 'wb') as f:
-                pickle.dump(df, f, protocol=pickle.HIGHEST_PROTOCOL)
-            
-            # SQLite DB 생성
-            create_sqlite_db(df, './nutrition_data.db')
-            
-        st.success("🎉 캐시 생성 완료! 다음번부터는 초고속 로딩됩니다.")
-        
-        return df
-        
-    except Exception as e:
-        st.error(f"데이터 로딩 오류: {e}")
-        return None
+    st.success("🎉 캐시 생성 완료! 다음번부터는 초고속 로딩됩니다.")
 
 # 일일 권장량 기준 설정
 DAILY_RECOMMENDATIONS = {
