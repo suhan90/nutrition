@@ -16,6 +16,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+GOOGLE_DRIVE_CONFIG = {
+    "file_id": "1FrAR9SRDVbppLbeP-F2IFY3FQwLWB1oX", 
+    "file_name": "20250327_가공식품DB_147999건.xlsx"
+}
+
 # Streamlit 페이지 설정
 st.set_page_config(
     page_title="식품영양정보 분석기",
@@ -252,7 +257,7 @@ def load_data():
         return df
     
     # 5순위: Google Drive에서 다운로드 https://docs.google.com/spreadsheets/d/1FrAR9SRDVbppLbeP-F2IFY3FQwLWB1oX/edit
-    if GOOGLE_DRIVE_CONFIG["file_id"] != "1FrAR9SRDVbppLbeP-F2IFY3FQwLWB1oX":
+    if GOOGLE_DRIVE_CONFIG["file_id"] != "":
         google_drive_file = download_from_google_drive(
             GOOGLE_DRIVE_CONFIG["file_id"], 
             GOOGLE_DRIVE_CONFIG["file_name"]
