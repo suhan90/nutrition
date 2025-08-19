@@ -183,7 +183,9 @@ def load_data_from_pickle():
 def load_data_from_database():
     """PostgreSQL/MySQL에서 데이터 로드 (프로덕션 환경)"""
     
-    if not HAS_SQLALCHEMY:
+    try:
+        from sqlalchemy import create_engine
+    except ImportError:
         return None
     
     try:
@@ -223,41 +225,43 @@ def load_data():
     start_time = time.time()
     
     # 1순위: Pickle 캐시 (가장 빠름)
-    df = load_data_from_pickle()
-    if df is not None:
-        load_time = time.time() - start_time
-        st.sidebar.success(f"🚀 Pickle 캐시: {len(df):,}개 식품 ({load_time:.2f}초)")
-        return df
+    try:
+        df = load_data_from_pickle()
+        if df is not None:
+            load_time = time.time() - start_time
+            st.sidebar.success(f"🚀 Pickle 캐시: {len(df):,}개 식품 ({load_time:.2f}초)")
+            return df
+    except Exception as e:
+        st.sidebar.warning(f"Pickle 로딩 실패: {str(e)[:50]}...")
     
     # 2순위: SQLite 로컬 DB
-    df = load_data_from_sqlite()
-    if df is not None:
-        load_time = time.time() - start_time
-        st.sidebar.success(f"💾 SQLite DB: {len(df):,}개 식품 ({load_time:.2f}초)")
-        return df
+    try:
+        df = load_data_from_sqlite()
+        if df is not None:
+            load_time = time.time() - start_time
+            st.sidebar.success(f"💾 SQLite DB: {len(df):,}개 식품 ({load_time:.2f}초)")
+            return df
+    except Exception as e:
+        st.sidebar.warning(f"SQLite 로딩 실패: {str(e)[:50]}...")
     
     # 3순위: 최적화된 Parquet 파일
-    df = load_optimized_data()
-    if df is not None:
-        load_time = time.time() - start_time
-        st.sidebar.success(f"⚡ Parquet: {len(df):,}개 식품 ({load_time:.2f}초)")
-        return df
+    try:
+        df = load_optimized_data()
+        if df is not None:
+            load_time = time.time() - start_time
+            st.sidebar.success(f"⚡ Parquet: {len(df):,}개 식품 ({load_time:.2f}초)")
+            return df
+    except Exception as e:
+        st.sidebar.warning(f"Parquet 로딩 실패: {str(e)[:50]}...")
     
-    # 4순위: 원격 데이터베이스
-    df = load_data_from_database()
-    if df is not None:
-        load_time = time.time() - start_time
-        st.sidebar.info(f"🌐 원격 DB: {len(df):,}개 식품 ({load_time:.2f}초)")
-        return df
-    
-    # 5순위: Google Drive에서 다운로드
+    # 4순위: Google Drive에서 다운로드
     if GOOGLE_DRIVE_CONFIG["file_id"] != "1your-google-drive-file-id-here":
-        google_drive_file = download_from_google_drive(
-            GOOGLE_DRIVE_CONFIG["file_id"], 
-            GOOGLE_DRIVE_CONFIG["file_name"]
-        )
-        if google_drive_file and os.path.exists(google_drive_file):
-            try:
+        try:
+            google_drive_file = download_from_google_drive(
+                GOOGLE_DRIVE_CONFIG["file_id"], 
+                GOOGLE_DRIVE_CONFIG["file_name"]
+            )
+            if google_drive_file and os.path.exists(google_drive_file):
                 df = pd.read_excel(google_drive_file)
                 load_time = time.time() - start_time
                 st.sidebar.info(f"☁️ Google Drive: {len(df):,}개 식품 ({load_time:.2f}초)")
@@ -266,10 +270,10 @@ def load_data():
                 df = preprocess_dataframe(df)
                 create_all_caches(df)
                 return df
-            except Exception as e:
-                st.error(f"Google Drive 파일 로딩 오류: {e}")
+        except Exception as e:
+            st.sidebar.warning(f"Google Drive 로딩 실패: {str(e)[:50]}...")
     
-    # 6순위: 로컬 파일 검색
+    # 5순위: 로컬 파일 검색
     local_files = ['./20250327_가공식품DB_147999건.csv', './20250327_가공식품DB_147999건.xlsx']
     
     for file_path in local_files:
@@ -291,10 +295,11 @@ def load_data():
                 return df
                 
             except Exception as e:
-                st.error(f"{file_path} 로딩 오류: {e}")
+                st.sidebar.error(f"{file_path} 로딩 오류: {str(e)[:50]}...")
                 continue
     
     # 모든 방법 실패시 파일 업로드 유도
+    st.error("데이터 파일을 찾을 수 없습니다.")
     return None
 
 def preprocess_dataframe(df):
