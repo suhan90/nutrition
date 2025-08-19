@@ -32,6 +32,81 @@ st.set_page_config(
 # 한글 폰트 설정 (Streamlit Cloud에서는 기본 폰트 사용)
 plt.rcParams['axes.unicode_minus'] = False
 
+def download_from_google_drive(file_id, file_name):
+    """Google Drive에서 파일 다운로드"""
+    try:
+        # Google Drive 직접 다운로드 URL
+        download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+        
+        with st.spinner(f"🌐 Google Drive에서 {file_name} 다운로드 중..."):
+            # 파일이 이미 존재하면 스킵
+            if os.path.exists(file_name):
+                st.success(f"✅ {file_name} 파일이 이미 존재합니다.")
+                return file_name
+            
+            # 세션 생성
+            session = requests.Session()
+            
+            # 첫 번째 요청으로 파일 크기와 확인 토큰 가져오기
+            response = session.get(download_url, stream=True)
+            
+            # 큰 파일의 경우 확인 토큰이 필요할 수 있음
+            if "virus scan warning" in response.text or "download anyway" in response.text:
+                # HTML에서 확인 토큰 추출
+                for line in response.text.split('\n'):
+                    if 'confirm=' in line and 'download' in line:
+                        import re
+                        token_match = re.search(r'confirm=([^&]+)', line)
+                        if token_match:
+                            token = token_match.group(1)
+                            download_url = f"https://drive.google.com/uc?export=download&confirm={token}&id={file_id}"
+                            break
+                
+                # 토큰과 함께 다시 요청
+                response = session.get(download_url, stream=True)
+            
+            # 파일 다운로드
+            if response.status_code == 200:
+                total_size = int(response.headers.get('content-length', 0))
+                
+                with open(file_name, 'wb') as f:
+                    if total_size > 0:
+                        # 진행률 표시
+                        progress_bar = st.progress(0)
+                        downloaded = 0
+                        
+                        for chunk in response.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+                                downloaded += len(chunk)
+                                progress = downloaded / total_size
+                                progress_bar.progress(progress)
+                    else:
+                        # 크기를 알 수 없는 경우
+                        for chunk in response.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+                
+                st.success(f"✅ {file_name} 다운로드 완료! ({os.path.getsize(file_name) / 1024 / 1024:.1f}MB)")
+                return file_name
+            else:
+                st.error(f"❌ 다운로드 실패: HTTP {response.status_code}")
+                return None
+                
+    except Exception as e:
+        st.error(f"❌ Google Drive 다운로드 오류: {str(e)}")
+        
+        # 대체 다운로드 방법 시도
+        try:
+            st.info("🔄 대체 다운로드 방법 시도 중...")
+            alt_url = f"https://drive.google.com/file/d/{file_id}/view"
+            st.markdown(f"📎 수동 다운로드: [여기를 클릭하여 파일을 다운로드하세요]({alt_url})")
+            st.info("다운로드한 파일을 아래 업로더를 통해 업로드해주세요.")
+        except:
+            pass
+            
+        return None
+
 # 최적화된 데이터 로딩 함수들
 @st.cache_data(ttl=3600, show_spinner="데이터를 최적화하는 중...")  # 1시간 캐시
 def convert_to_parquet():
@@ -178,45 +253,6 @@ def load_data_from_pickle():
         st.error(f"Pickle 로딩 오류: {e}")
         return None
 
-# PostgreSQL/MySQL 연동 (선택사항)
-@st.cache_data(ttl=900)  # 15분 캐시
-def load_data_from_database():
-    """PostgreSQL/MySQL에서 데이터 로드 (프로덕션 환경)"""
-    
-    try:
-        from sqlalchemy import create_engine
-    except ImportError:
-        return None
-    
-    try:
-        # Streamlit secrets에서 DB 정보 가져오기
-        db_config = st.secrets.get("database", {})
-        if not db_config:
-            return None
-            
-        engine = create_engine(
-            f"postgresql://{db_config['username']}:{db_config['password']}@"
-            f"{db_config['host']}:{db_config['port']}/{db_config['database']}"
-        )
-        
-        # 쿼리 최적화: 필요한 컬럼만 선택
-        query = """
-        SELECT 식품명, 대표식품명, 식품소분류명, 에너지_kcal as "에너지(kcal)",
-               단백질_g as "단백질(g)", 지방_g as "지방(g)", 탄수화물_g as "탄수화물(g)",
-               당류_g as "당류(g)", 나트륨_mg as "나트륨(mg)", 콜레스테롤_mg as "콜레스테롤(mg)",
-               포화지방산_g as "포화지방산(g)", 식이섬유_g as "식이섬유(g)", 
-               칼슘_mg as "칼슘(mg)", 식품중량, 제조사명
-        FROM nutrition_data 
-        ORDER BY 식품명
-        """
-        
-        df = pd.read_sql(query, engine)
-        engine.dispose()
-        return df
-        
-    except Exception:
-        # DB 연결 실패시 조용히 넘어감
-        return None
 
 def load_data():
     """초고속 데이터 로딩 - 여러 소스에서 최적 경로 자동 선택"""
